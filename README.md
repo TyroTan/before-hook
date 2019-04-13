@@ -48,7 +48,7 @@ export { authenticatedHandler };
   * Granularity and Composability
     * Write your own middlewares, short, testable and easy to use.
 
-# More Example - Creating a middleware for a third party api integration using `base` middleware
+### More Example - Creating a middleware for a third party api integration using `base` middleware
 
 ```
 import { CreateInstance, BaseMiddleware } from 'before-hook';
@@ -95,7 +95,7 @@ export { getColleagues };
 // http://localhost:3000/getColleagues
 ```
 
-# License
+### License
 
 Copyright (c) 2019, Tyro Hunter Tan
 
