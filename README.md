@@ -48,11 +48,54 @@ export { authenticatedHandler };
   * Granularity and Composability
     * Write your own middlewares, short, testable and easy to use.
 
-## Authors
+# More Example - Creating a middleware for a third party api integration using `base` middleware
 
-* **Tyro Hunter Tan** - *Initial work* - [before-hook](https://github.com/slugs99)
+```
+import { CreateInstance, BaseMiddleware } from 'before-hook';
 
-## License
+const getColleaguesHandler = async (event, context) => {
+  try {
+    // event.user will be set by the middleware - AuthMiddleware
+    // event.userFriends will be set by the 2nd custom middleware
+    // if it’s null, the middleware returns a 403 response and this handler will not be reached at all
+
+    const { friends } = event.user;
+    const colleagues = friends.filter(friend => friend.groupId === 25);
+
+    return response({
+      statusCode: 200,
+      data: colleagues
+    });
+  } catch (e) {
+    return {
+      statusCode: 500,
+      message: e.message
+    }
+  }
+};
+
+const beforeHook = CreateInstance(); // provide configs if necessary
+const getColleagues = beforeHook(getColleaguesHandler)
+  .use(AuthMiddleware()) // sets event.user based from JWT token
+  .use(
+    BaseMiddleware({
+      handler: async ({ getParams }) => {
+        const { event, setEvent } = getParams();
+        const { socialNetworkingSiteId } = event.user; // assuming we have this field from "claims"
+        const friends = await THIRD_PARTY_API.getFriendsById(socialNetworkingSiteId);
+        setEvent({
+          userFriends: friends
+        })
+      }
+    })
+  );
+
+export { getColleagues };
+
+// http://localhost:3000/getColleagues
+```
+
+# License
 
 Copyright (c) 2019, Tyro Hunter Tan
 
