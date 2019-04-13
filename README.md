@@ -1,6 +1,6 @@
-# npm install before-hook
+## npm install before-hook
 
-A modern pre-hook JS library that's just easy.
+A modern pre-hook JS library that's just easy, built with love and style.
 
 ## Getting Started
 
@@ -8,7 +8,7 @@ Basically, you have found this library because you are looking for a way to re-u
 
 ```
 
-import { Create } from 'before-hook';
+import { CreateInstance } from 'before-hook';
 
 const toBeAuthenticatedHandler = async (event, context) => {
   // event.user will be set by the middleware
@@ -20,7 +20,7 @@ const toBeAuthenticatedHandler = async (event, context) => {
   return response(data);
 };
 
-const beforeHook = Create(); // provide configs if necessary
+const beforeHook = CreateInstance(); // provide configs if necessary
 const authenticatedHandler = beforeHook(toBeAuthenticatedHandler).use(
   AuthenticationMiddleware()
 );
