@@ -1,6 +1,6 @@
 {
   "name": "before-hook",
-  "version": "0.2.8-beta.0",
+  "version": "0.2.8-beta.1",
   "description": "A modern pre-hook JS library that's just easy, built with love and style.",
   "main": "index.js",
   "scripts": {
