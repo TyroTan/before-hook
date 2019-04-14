@@ -1,6 +1,6 @@
 {
   "name": "before-hook",
-  "version": "0.2.7",
+  "version": "0.2.8-beta.0",
   "description": "A modern pre-hook JS library that's just easy, built with love and style.",
   "main": "index.js",
   "scripts": {
@@ -11,9 +11,12 @@
   },
   "keywords": [
     "hook",
+    "hooks",
+    "prehook",
     "pre-hook",
-    "function",
+    "beforehook",
     "middleware",
+    "function",
     "lambda",
     "serverless"
   ],
@@ -34,5 +37,9 @@
     "jest": "24.7.1",
     "jwt-decode": "2.2.0",
     "ts-jest": "24.0.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/slugs99/before-hook.git"
   }
 }
