@@ -1,3 +1,5 @@
+## Warning - before-hook is still in 'alpha' stage.
+
 ## npm install before-hook
 
 A modern pre-hook JS library that's just easy, built with love and style.
