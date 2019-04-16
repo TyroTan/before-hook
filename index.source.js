@@ -3,9 +3,9 @@ const MIDDLEWARE_CONSTANTS = {
   HTTP_RESPONSE: `${MIDDLEWARE_PREFIX}HTTP_RESPONSE`
 };
 
-const isAsyncFunction = fn => {
+/* const isAsyncFunction = fn => {
   return fn.constructor.name === "AsyncFunction";
-};
+}; */
 
 const objectAssignIfExists = (...args) => {
   const def = { ...args[1] };
@@ -120,16 +120,15 @@ const MiddlewareHelpersInit = () => {
 const setState = (objs, state) => {
   const newState = state;
 
-  // console.log("state", state);
   Object.keys(objs).forEach(key => {
     newState[key] = objs[key];
   });
 
-  // console.log("new state", newState);
   return newState;
 };
 const setContext = setState;
-const simpleClone = objectToClone => JSON.parse(JSON.stringify(objectToClone));
+const simpleClone = objectToClone =>
+  /* JSON.parse(JSON.stringify( */ objectToClone; /* )) */
 const clone = simpleClone;
 
 const BaseMiddlewareHandlerInit = handler => {
@@ -171,17 +170,16 @@ const BaseMiddleware = ({ handler, configure } = {}) => {
 
   if (configure && configure.augmentMethods) {
     const { augmentMethods = {} } = configure;
-    const configurableMethods = ["onCatchHandler"];
+    const configurableMethods = ["onCatch"];
 
     configurableMethods.forEach(fnName => {
       const newMethod = augmentMethods[fnName];
 
       if (typeof newMethod === "function") {
-        if (fnName === "onCatchHandler") {
-
-          pre.scrtOnCatchHandler = (oldMethod, e) => {
+        if (fnName === "onCatch") {
+          pre.scrtOnCatch = (oldMethod, e) => {
             return newMethod(() => oldMethod(e), {
-              prevMethodwithNoArgs: oldMethod,
+              prevRawMethod: oldMethod,
               arg: e
             });
           };
@@ -200,66 +198,6 @@ const BodyParserMiddleware = () => {
       if (Object.keys({ ...event.body }).length) {
         setEvent({ body: JSON.parse(event.body) });
       }
-    }
-  });
-};
-
-const AuthMiddleware = ({ promisify, cognitoJWTDecodeHandler } = {}) => {
-  if (
-    (promisify && typeof promisify !== "function") ||
-    (cognitoJWTDecodeHandler && typeof cognitoJWTDecodeHandler !== "function")
-  ) {
-    throw Error(
-      `invalid (promisify and cognitoJWTDecodeHandler) passed. ${typeof promisify},  ${typeof cognitoJWTDecodeHandler}`
-    );
-  }
-
-  return BaseMiddleware({
-    configure: {
-      augmentMethods: {
-        onCatchHandler: () => {
-          return {
-            statusCode: 403,
-            body: "Invalid Session",
-            headers: { "Access-Control-Allow-Origin": "*" }
-          };
-        }
-      }
-    },
-    handler: async ({ getParams, getHelpers }) => {
-      const { event, setEvent, context } = getParams();
-      const { returnAndSendResponse } = getHelpers();
-
-      if (!event || !event.headers) return {};
-
-      const newEventHeaders = {
-        ...event.headers
-      };
-
-      if (!newEventHeaders.Authorization) {
-        newEventHeaders.Authorization = newEventHeaders.authorization;
-      }
-
-      let promised = cognitoJWTDecodeHandler;
-      if (!isAsyncFunction(promised)) {
-        promised = promisify(promised);
-      }
-      const claims = await promised(
-        Object.assign({}, event, { headers: newEventHeaders }),
-        context
-      );
-
-      if (!claims || typeof claims.sub !== "string") {
-        return returnAndSendResponse({
-          statusCode: 403,
-          body: "Invalid Session",
-          headers: { "Access-Control-Allow-Origin": "*" }
-        });
-      }
-
-      setEvent({ user: claims });
-
-      return {};
     }
   });
 };
@@ -284,7 +222,7 @@ const CreateInstance = options => {
    *
    * CONFIGURABLES - START
    *
-  **/
+   * */
 
   let pvtLogger = {
     /* eslint-disable-next-line no-console */
@@ -293,8 +231,8 @@ const CreateInstance = options => {
     /* eslint-disable-next-line no-console */
     logError: (...args) => args.forEach(l => console.error(l.message || l)),
 
-    /* eslint-disable-next-line no-console */
     logWarning: (...args) =>
+      /* eslint-disable-next-line no-console */
       args.forEach(l => console.error(`WARNING: ${l.message || l}`))
   };
 
@@ -304,7 +242,9 @@ const CreateInstance = options => {
     pvtLogger.logWarning = () => {};
   }
 
-  let onCatchHandler = e => {
+  let onCatch = (...args) => {
+    const [e] = args;
+
     if (pvtLogger && typeof pvtLogger.logError === "function") {
       pvtLogger.logError(e);
     }
@@ -313,6 +253,7 @@ const CreateInstance = options => {
     if (read.isMiddlewareHTTPResponse === true) {
       return read.responseObject;
     }
+
     return {
       statusCode: 500,
       body: `${read.errorMessage}`
@@ -327,31 +268,29 @@ const CreateInstance = options => {
    *
    * CONFIGURABLES - END
    *
-  **/
+   * */
 
   const configure = ({ augmentMethods = {} } = {}) => {
-    const configurableMethods = [
-      "onCatchHandler",
-      "handlerCallWrapper",
-      "pvtLogger"
-    ];
+    const configurableMethods = ["onCatch", "handlerCallWrapper", "pvtLogger"];
 
     configurableMethods.forEach(fnName => {
       const newMethod = augmentMethods[fnName];
       if (typeof newMethod === "function") {
-        if (fnName === "onCatchHandler") {
-          const oldMethod = onCatchHandler;
-          onCatchHandler = e => {
-            return newMethod(() => oldMethod(e), {
-              prevMethodwithNoArgs: oldMethod,
-              arg: e
+        if (fnName === "onCatch") {
+          const oldMethod = onCatch;
+          onCatch = (arg1, { event, context }) => {
+            return newMethod(() => oldMethod(arg1), {
+              prevRawMethod: oldMethod,
+              arg: arg1,
+              event,
+              context
             });
           };
         } else if (fnName === "handlerCallWrapper") {
           const oldMethod = handlerCallWrapper;
           handlerCallWrapper = e => {
             return newMethod(() => oldMethod(e), {
-              prevMethodwithNoArgs: oldMethod,
+              prevRawMethod: oldMethod,
               arg: e
             });
           };
@@ -359,7 +298,7 @@ const CreateInstance = options => {
           const oldMethod = pvtLogger;
           pvtLogger = e => {
             return newMethod(() => oldMethod(e), {
-              prevMethodwithNoArgs: oldMethod,
+              prevRawMethod: oldMethod,
               arg: e
             });
           };
@@ -377,9 +316,9 @@ const CreateInstance = options => {
    *
    * CORE - START
    *
-  **/
+   * */
 
-  /** Function Object Init "Before Hook" **/
+  /** Function Object Init "Before Hook" * */
   const FOInitBeforeHook = (...args) => {
     if (typeof args[0] !== "function") {
       return FOInvokeMiddlewares(...args);
@@ -463,15 +402,25 @@ const CreateInstance = options => {
           );
         }
       }
-    } catch (e) {
+    } catch (middlewaresThrow) {
       const catchHandlerToUse =
-        typeof hookBeforeCatching.scrtOnCatchHandler === "function"
-          ? err => hookBeforeCatching.scrtOnCatchHandler(onCatchHandler, err)
-          : onCatchHandler;
+        typeof hookBeforeCatching.scrtOnCatch === "function"
+          ? (err, eventAndContext) =>
+              hookBeforeCatching.scrtOnCatch(
+                e => onCatch(e, eventAndContext),
+                err
+              )
+          : (err, eventAndContext) => onCatch(err, eventAndContext);
       if (settings.stopOnCatch === true) {
-        return catchHandlerToUse(e);
+        return catchHandlerToUse(middlewaresThrow, {
+          event: extendedEvent,
+          context: extendedContext
+        });
       }
-      catchHandlerToUse(e);
+      catchHandlerToUse(middlewaresThrow, {
+        event: extendedEvent,
+        context: extendedContext
+      });
     }
 
     return handlerCallWrapper(extendedEvent, extendedContext);
@@ -486,7 +435,7 @@ const CreateInstance = options => {
    *
    * CORE - END
    *
-  **/
+   * */
 
   return FOInitBeforeHook;
 };
@@ -495,7 +444,6 @@ export {
   MIDDLEWARE_CONSTANTS,
   BaseMiddleware,
   BodyParserMiddleware,
-  AuthMiddleware,
   CreateInstance,
   getHandlerArgumentsLength,
   validateHandler

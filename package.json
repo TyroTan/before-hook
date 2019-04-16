@@ -1,11 +1,14 @@
 {
   "name": "before-hook",
-  "version": "0.2.8-beta.1",
+  "version": "0.2.8-alpha.3",
   "description": "A modern pre-hook JS library that's just easy, built with love and style.",
   "main": "index.js",
   "scripts": {
     "startOld": "babel-node index.source.js",
-    "build": "babel index.source.js --out-file index.js",
+    "devlint": "eslint index.source.js --fix",
+    "lint:dev": "npm run lint:commons && tslint -c tslint.json --fix './src/**/*.ts' && eslint src/*andler.js --fix && eslint src/**/*.js --fix",
+    "lint:ts": "tslint -c tslint.json --fix './src/**/*.ts' && eslint ./src --fix",
+    "build": "npm run devlint && babel index.source.js --out-file index.js",
     "pretest": "npm run build && babel tests/all-test.js --out-file tests/all.test.compiled.js",
     "test": "jest"
   },
@@ -21,7 +24,7 @@
     "serverless"
   ],
   "author": "Tyro Hunter Tan <tantyrohunter@gmail.com>",
-  "license": "ISC",
+  "license": "MIT",
   "dependencies": {
     "@babel/runtime": "7.0.0-beta.55",
     "source-map-support": "0.5.12"
@@ -36,7 +39,14 @@
     "babel-plugin-source-map-support": "2.0.1",
     "jest": "24.7.1",
     "jwt-decode": "2.2.0",
-    "ts-jest": "24.0.2"
+    "ts-jest": "24.0.2",
+    "eslint": "5.4.0",
+    "eslint-config-airbnb": "17.1.0",
+    "eslint-config-prettier": "4.0.0",
+    "eslint-import-resolver-typescript": "1.1.1",
+    "eslint-plugin-import": "2.14.0",
+    "eslint-plugin-jsx-a11y": "6.1.1",
+    "eslint-plugin-react": "7.11.0"
   },
   "repository": {
     "type": "git",

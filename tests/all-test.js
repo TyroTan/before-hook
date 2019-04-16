@@ -6,14 +6,87 @@ const jwtdecodeAsyncHandler = CognitoDecodeVerifyJWTInit({
 }).UNSAFE_BUT_FAST_handler;
 import { promisify } from "util";
 
+const mockedExpressResponse = () => {
+  return {
+    send: (code, data) => ({
+      statusCode: code,
+      data
+    }),
+    json: data => {
+      return { ...data, resJsoned: true };
+    }
+  };
+};
+
 import {
   CreateInstance,
   validateHandler,
   getHandlerArgumentsLength,
-  AuthMiddleware,
   BaseMiddleware,
   BodyParserMiddleware
 } from "../index.js";
+
+const isAsyncFunction = fn =>
+  fn && fn.constructor && fn.constructor.name === "AsyncFunction";
+const AuthMiddleware = ({ promisify, cognitoJWTDecodeHandler } = {}) => {
+  if (
+    (promisify && typeof promisify !== "function") ||
+    (cognitoJWTDecodeHandler && typeof cognitoJWTDecodeHandler !== "function")
+  ) {
+    throw Error(
+      `invalid (promisify and cognitoJWTDecodeHandler) passed. ${typeof promisify},  ${typeof cognitoJWTDecodeHandler}`
+    );
+  }
+
+  return BaseMiddleware({
+    configure: {
+      augmentMethods: {
+        onCatch: () => {
+          return {
+            statusCode: 403,
+            body: "Invalid Session",
+            headers: { "Access-Control-Allow-Origin": "*" }
+          };
+        }
+      }
+    },
+    handler: async ({ getParams, getHelpers }) => {
+      const { event, setEvent, context } = getParams();
+      const { returnAndSendResponse } = getHelpers();
+
+      if (!event || !event.headers) return {};
+
+      const newEventHeaders = {
+        ...event.headers
+      };
+
+      if (!newEventHeaders.Authorization) {
+        newEventHeaders.Authorization = newEventHeaders.authorization;
+      }
+
+      let promised = cognitoJWTDecodeHandler;
+      if (!isAsyncFunction(promised)) {
+        promised = promisify(promised);
+      }
+      const claims = await promised(
+        Object.assign({}, event, { headers: newEventHeaders }),
+        context
+      );
+
+      if (!claims || typeof claims.sub !== "string") {
+        return returnAndSendResponse({
+          statusCode: 403,
+          body: "Invalid Session",
+          headers: { "Access-Control-Allow-Origin": "*" }
+        });
+      }
+
+      setEvent({ user: claims });
+
+      return {};
+    }
+  });
+};
 
 const test1 = {
   handler: () => {}, // params are optional
@@ -322,14 +395,9 @@ describe(`Error Handling`, () => {
         DEBUG: true,
         configure: {
           augmentMethods: {
-            onCatchHandler: (
-              prevMethodwithArgs,
-              { prevMethodwithNoArgs, arg } = {}
-            ) => {
-              expect(prevMethodwithArgs()).toStrictEqual(
-                prevMethodwithNoArgs(arg)
-              );
-              return Object.assign({}, prevMethodwithNoArgs(arg), {
+            onCatch: (prevMethodwithArgs, { prevRawMethod, arg } = {}) => {
+              expect(prevMethodwithArgs()).toStrictEqual(prevRawMethod(arg));
+              return Object.assign({}, prevRawMethod(arg), {
                 headers: { "Access-Control-Allow-Origin": "*" }
               });
             }
@@ -422,7 +490,7 @@ describe(`Error Handling`, () => {
       instance12 = CreateInstance({
         configure: {
           augmentMethods: {
-            onCatchHandler: (fn) => {
+            onCatch: fn => {
               return Object.assign({}, fn(), {
                 statusCode: 500,
                 headers: { "Access-Control-Allow-Origin": "*" }
@@ -444,7 +512,7 @@ describe(`Error Handling`, () => {
         BaseMiddleware({
           configure: {
             augmentMethods: {
-              onCatchHandler: (fn) => {
+              onCatch: fn => {
                 return Object.assign({}, fn(), {
                   statusCode: 403
                 });
@@ -483,7 +551,7 @@ describe(`Error Handling`, () => {
         BaseMiddleware({
           configure: {
             augmentMethods: {
-              onCatchHandler: (fn) => {
+              onCatch: fn => {
                 return Object.assign({}, fn(), {
                   statusCode: 403
                 });
@@ -513,7 +581,7 @@ describe(`Error Handling`, () => {
           BaseMiddleware({
             configure: {
               augmentMethods: {
-                onCatchHandler: (fn) => {
+                onCatch: fn => {
                   return Object.assign({}, fn(), {
                     statusCode: 123
                   });
@@ -529,7 +597,7 @@ describe(`Error Handling`, () => {
           BaseMiddleware({
             configure: {
               // augmentMethods: {
-              //   onCatchHandler: (fn, ...args) => {
+              //   onCatch: (fn, ...args) => {
               //     return Object.assign({}, fn(...args), {
               //       statusCode: 403,
               //       headers: { "Access-Control-Allow-Origin": "*" }
@@ -565,7 +633,7 @@ describe(`Error Handling`, () => {
   //   instance12 = CreateInstance({
   //     configure: {
   //       augmentMethods: {
-  //         onCatchHandler: async (fn, ...args) => {
+  //         onCatch: async (fn, ...args) => {
 });
 
 describe(`Post Hook`, () => {
@@ -927,5 +995,101 @@ describe(`Auth Middleware`, () => {
       });
       expect(res.prefix.body).toEqual("");
     });
+  });
+});
+
+describe(`Configure to be compatible with Express`, () => {
+  describe(`When an error or returnAndSendResponse is called, we call onCatch`, () => {
+    let instance1;
+    beforeEach(() => {
+      instance1 = CreateInstance({
+        DEBUG: true,
+        configure: {
+          augmentMethods: {
+            onCatch: (prevMethodwithArgs, { prevRawMethod, arg } = {}) => {
+              expect(prevMethodwithArgs()).toStrictEqual(prevRawMethod(arg));
+              return Object.assign({}, prevRawMethod(arg), {
+                headers: { "Access-Control-Allow-Origin": "*" }
+              });
+            }
+          }
+        }
+      });
+    });
+
+    it("should not be called when there is no error", async () => {
+      const fn = async (event, context) => {
+        return {
+          event,
+          context
+        };
+      };
+
+      const hookedHandler = instance1(fn);
+      const res = await hookedHandler({ body: 123 }, {});
+
+      expect(res).toStrictEqual({
+        event: {
+          body: 123
+        },
+        context: {}
+      });
+    });
+
+    it("should be able to call res.json upon error", async () => {
+      instance1 = CreateInstance({
+        DEBUG: true,
+        configure: {
+          augmentMethods: {
+            onCatch: (
+              prevMethodwithArgs,
+              { prevRawMethod, arg, context } = {}
+            ) => {
+              expect(prevMethodwithArgs()).toStrictEqual(prevRawMethod(arg));
+
+              const res = Object.assign({}, prevRawMethod(arg), {
+                extra: "field_added",
+                headers: { "Access-Control-Allow-Origin": "*" }
+              });
+              if (context && context.json) {
+                return context.json(res);
+              }
+
+              return res;
+            }
+          }
+        }
+      });
+
+      const fn = async (event, context) => {
+        return {
+          event
+        };
+      };
+
+      const hookedHandler = instance1(fn).use(
+        BaseMiddleware({
+          handler: async ({ getParams, getHelpers }) => {
+            const { event } = getParams();
+            if (event) {
+              getHelpers().returnAndSendResponse({
+                ...event
+              });
+            }
+          }
+        })
+      );
+      const res = await hookedHandler({ body: 123 }, mockedExpressResponse());
+
+      expect(res).toStrictEqual({
+        resJsoned: true,
+        body: 123,
+        extra: "field_added",
+        headers: { "Access-Control-Allow-Origin": "*" }
+      });
+    });
+
+    // it("should be called after onCatch", async () => {
+    // it("should be able to override/augment onCatch", async () => {
   });
 });
