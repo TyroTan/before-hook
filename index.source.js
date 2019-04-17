@@ -117,14 +117,16 @@ const MiddlewareHelpersInit = () => {
   });
 };
 
-const setState = (objs, state) => {
+const setState = (objs, oldState, state) => {
+  const mutatedOldState = oldState;
   const newState = state;
 
   Object.keys(objs).forEach(key => {
     newState[key] = objs[key];
+    mutatedOldState[key] = objs[key];
   });
 
-  return newState;
+  return mutatedOldState;
 };
 const setContext = setState;
 const simpleClone = objectToClone =>
@@ -140,9 +142,9 @@ const BaseMiddlewareHandlerInit = handler => {
       {
         getParams: () => ({
           event: pvtEvent,
-          setEvent: objs => setState(objs, pvtEvent),
+          setEvent: objs => setState(objs, event, pvtEvent),
           context: pvtContext,
-          setContext: objs => setContext(objs, pvtContext)
+          setContext: objs => setContext(objs, context, pvtContext)
         }),
         getHelpers: MiddlewareHelpersInit()
       },
@@ -391,15 +393,11 @@ const CreateInstance = options => {
         const extensions = await hook(extendedEvent, extendedContext);
 
         if (extensions.event) {
-          extendedEvent = Object.assign({}, extendedEvent, extensions.event);
+          extendedEvent = setState(extensions.event, event, extendedEvent);
         }
 
         if (extensions.context) {
-          extendedContext = Object.assign(
-            {},
-            extendedContext,
-            extensions.context
-          );
+          extendedContext = setState(extensions.context, context, extendedContext);
         }
       }
     } catch (middlewaresThrow) {
