@@ -211,8 +211,7 @@ describe(`getHandlerArgumentsLength`, () => {
       const hello = async (event, context) => {
         return {};
       };
-
-      console.log("hello tostr", hello.toString());
+      
       expect(validateHandler(hello)).toEqual(true);
     });
   });
@@ -809,8 +808,6 @@ describe(`Auth Middleware`, () => {
           Authorization: "token"
         }
       });
-
-      console.log("res", res);
 
       expect(res).toBeDefined();
       expect(res.statusCode).toEqual(500);
