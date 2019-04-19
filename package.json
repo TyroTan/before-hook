@@ -1,6 +1,6 @@
 {
   "name": "before-hook",
-  "version": "0.2.8-alpha.5",
+  "version": "0.3.0-alpha.0",
   "description": "A modern pre-hook JS library that's just easy, built with love and style.",
   "main": "index.js",
   "scripts": {
@@ -9,7 +9,7 @@
     "lint:dev": "npm run lint:commons && tslint -c tslint.json --fix './src/**/*.ts' && eslint src/*andler.js --fix && eslint src/**/*.js --fix",
     "lint:ts": "tslint -c tslint.json --fix './src/**/*.ts' && eslint ./src --fix",
     "build": "npm run devlint && babel index.source.js --out-file index.js",
-    "pretest": "npm run build && babel tests/all-test.js --out-file tests/all.test.compiled.js",
+    "pretest": "npm run build",
     "test": "jest"
   },
   "keywords": [

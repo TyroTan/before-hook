@@ -1,27 +1,16 @@
-const CognitoDecodeVerifyJWTInit = require("./token-decode-test");
+const CognitoDecodeVerifyJWTInit = require("./token-decode-test-version");
 
 const jwt_decode = require("jwt-decode");
 const jwtdecodeAsyncHandler = CognitoDecodeVerifyJWTInit({
   jwt_decode
 }).UNSAFE_BUT_FAST_handler;
+const SYMBOL_BEFOREHOOK_MIDDLEWARE_ID = Symbol(
+  "SYMBOL_BEFOREHOOK_MIDDLEWARE_ID"
+);
 import { promisify } from "util";
-
-const mockedExpressResponse = () => {
-  return {
-    send: (code, data) => ({
-      statusCode: code,
-      data
-    }),
-    json: data => {
-      return { ...data, resJsoned: true };
-    }
-  };
-};
 
 import {
   CreateInstance,
-  validateHandler,
-  getHandlerArgumentsLength,
   BaseMiddleware,
   BodyParserMiddleware
 } from "../index.js";
@@ -51,7 +40,7 @@ const AuthMiddleware = ({ promisify, cognitoJWTDecodeHandler } = {}) => {
       }
     },
     handler: async ({ getParams, getHelpers }) => {
-      const { event, setEvent, context } = getParams();
+      const [event, context] = getParams();
       const { returnAndSendResponse } = getHelpers();
 
       if (!event || !event.headers) return {};
@@ -81,155 +70,15 @@ const AuthMiddleware = ({ promisify, cognitoJWTDecodeHandler } = {}) => {
         });
       }
 
-      setEvent({ user: claims });
+      event.user = claims;
 
       return {};
     }
   });
 };
 
-const test1 = {
-  handler: () => {}, // params are optional
-  result: 0,
-  msg: `params are optional`
-};
-
-const test2 = {
-  handler: event => {},
-  result: 1,
-  msg: `params are optional`
-};
-
-const test3 = {
-  handler: e => {},
-  result: 1,
-  msg: `1st param need to be event and not e`
-};
-
-const test4 = {
-  handler: events => {},
-  result: 1,
-  msg: `1st param need to be event and not events`
-};
-
-const test5 = {
-  handler: (event, context) => {},
-  result: 2,
-  msg: `params are optional`
-};
-
-const test6 = {
-  handler: (event, context123) => {},
-  result: 2,
-  msg: `2nd param need to be context and not context123`
-};
-
-const test7 = {
-  handler: (event, context, callback) => {},
-  result: 3,
-  msg: `params are optional`
-};
-
-const test8 = {
-  handler: (event, context, callbac) => {},
-  result: 3,
-  msg: `3rd param need to be callback and not callbac`
-};
-
-describe(`getHandlerArgumentsLength`, () => {
-  describe(`test getHandlerArgumentsLength correctness`, () => {
-    it(`should accept ~ ${test1.msg} = ${
-      test1.result
-    } length. ${test1.handler.toString()}`, () => {
-      const handler = test1.handler;
-      expect(getHandlerArgumentsLength(handler)).toEqual(test1.result);
-    });
-
-    it(`should accept ~ ${test2.msg} = ${
-      test2.result
-    } length. ${test2.handler.toString()}`, () => {
-      const handler = test2.handler;
-      expect(getHandlerArgumentsLength(handler)).toEqual(test2.result);
-    });
-
-    it(`should accept ~ ${test5.msg} = ${
-      test5.result
-    } length. ${test5.handler.toString()}`, () => {
-      const handler = test5.handler;
-      expect(getHandlerArgumentsLength(handler)).toEqual(test5.result);
-    });
-
-    it(`should accept ~ ${test7.msg} = ${
-      test7.result
-    } length. ${test7.handler.toString()}`, () => {
-      const handler = test7.handler;
-      expect(getHandlerArgumentsLength(handler)).toEqual(test7.result);
-    });
-  });
-
-  describe.skip(`test validateHandler INVALID scenario`, () => {
-    it(`should NOT accept ~ ${test3.msg} ${test3.handler.toString()}`, () => {
-      const handler = test3.handler;
-      expect(validateHandler(handler)).toEqual(false);
-    });
-
-    it(`should NOT accept ~ ${test4.msg} ${test4.handler.toString()}`, () => {
-      const handler = test4.handler;
-      expect(validateHandler(handler)).toEqual(false);
-    });
-
-    it(`should NOT accept ~ ${test6.msg} ${test6.handler.toString()}`, () => {
-      const handler = test6.handler;
-      expect(validateHandler(handler)).toEqual(false);
-    });
-
-    it(`should NOT accept ~ ${test8.msg} ${test8.handler.toString()}`, () => {
-      const handler = test8.handler;
-      expect(validateHandler(handler)).toEqual(false);
-    });
-  });
-
-  describe.skip(`test validateHandler EDGE cases`, () => {
-    const fn1 = (event, /* comments, */ context, callback) => {};
-    it(`should accept with comments ~ ${fn1.toString()}`, () => {
-      const handler = fn1;
-
-      /* Future Feature
-       * expect(validateHandler(handler)).toEqual(true);
-       */
-      expect(() => validateHandler(handler)).toThrow(Error);
-    });
-
-    const fn2 = (event, /* comments, */ context, Callback) => {};
-    it(`should NoT accept case sensitive ~ ${fn2.toString()}`, () => {
-      const handler = fn2;
-
-      expect(validateHandler(handler)).toEqual(false);
-    });
-
-    it(`should accept const hello = (event, context) => {`, () => {
-      const hello = async (event, context) => {
-        return {};
-      };
-      
-      expect(validateHandler(hello)).toEqual(true);
-    });
-  });
-});
-
 describe(`CreateInstance`, () => {
   let instance1 = CreateInstance();
-
-  describe("Test errors or throws", () => {
-    it("should show error message", () => {
-      const expected = `Please use the exact argument names of the handler as the following event,context,callback or simply (event, context) => {} or () => {}`;
-      try {
-        instance1(e => {});
-      } catch (e) {
-        expect(e.message).toEqual(expect.stringContaining(expected));
-      }
-    });
-  });
 
   describe(".use", () => {
     beforeEach(() => {
@@ -302,7 +151,7 @@ describe(`AsyncFunction support`, () => {
     it("should be accepted", () => {
       const inv = BaseMiddleware({
         handler: async ({ getParams }) => {
-          const { event, setEvent } = getParams();
+          const [event] = getParams();
           const promisify = require("util").promisify;
           if (!event || !event.headers) return {};
           event.headers.Authorization = !event.headers.Authorization
@@ -311,11 +160,11 @@ describe(`AsyncFunction support`, () => {
           const promised = promisify(jwtdecodeAsyncHandler);
           const claims = await promised(event, context);
           if (claims && claims.sub && typeof claims.sub === "string") {
-            setEvent({ user: claims });
+            event.user = claims;
           }
         }
       });
-      inv.isHookMiddleware = true;
+      inv[SYMBOL_BEFOREHOOK_MIDDLEWARE_ID] = true;
 
       expect(() => {
         instance1(async () => {}).use(inv)();
@@ -352,13 +201,11 @@ describe(`AsyncFunction support`, () => {
         handler: async ({ getParams }) => {
           return new Promise(resolve => {
             setTimeout(() => {
-              const { setEvent } = getParams();
+              const [event] = getParams();
 
-              setEvent({
-                user: {
-                  email: "email@example.com"
-                }
-              });
+              event.user = {
+                email: "email@example.com"
+              };
               resolve();
             }, 1);
           });
@@ -373,11 +220,14 @@ describe(`AsyncFunction support`, () => {
       };
 
       const newHn = instance1(h).use(inv);
-      const res1 = await newHn({
-        headers: {
-          Authorization: "token1"
-        }
-      });
+      const res1 = await newHn(
+        {
+          headers: {
+            Authorization: "token1"
+          }
+        },
+        {}
+      );
 
       expect(res1.e.user).toBeDefined();
       expect(res1.e.user.email).toEqual("email@example.com");
@@ -475,9 +325,12 @@ describe(`Error Handling`, () => {
         })
       );
 
-      const res = await preHooked({
-        multiplier: 1
-      });
+      const res = await preHooked(
+        {
+          multiplier: 1
+        },
+        {}
+      );
 
       expect(res.statusCode).toEqual(500);
       expect(res.body).toMatch(`Forced . Lorem ipsum`);
@@ -524,16 +377,17 @@ describe(`Error Handling`, () => {
         })
       );
 
-      const res = await preHooked({
-        multiplier: 1
-      });
+      const res = await preHooked(
+        {
+          multiplier: 1
+        },
+        {}
+      );
 
       expect(res.statusCode).toEqual(403);
-      expect(res.body).toEqual(
-        `Bacon ipsum - Unexpected token B in JSON at position 0`
-      );
+      expect(res.body).toEqual(`Bacon ipsum`);
       expect(res).toStrictEqual({
-        body: `Bacon ipsum - Unexpected token B in JSON at position 0`,
+        body: `Bacon ipsum`,
         statusCode: 403,
         headers: { "Access-Control-Allow-Origin": "*" }
       });
@@ -616,7 +470,7 @@ describe(`Error Handling`, () => {
 
       expect(res2.statusCode).toEqual(500);
       expect(res2).toStrictEqual({
-        body: `Bacon ipsum23 - Unexpected token B in JSON at position 0`,
+        body: `Bacon ipsum23`,
         statusCode: 500,
         headers: { "Access-Control-Allow-Origin": "*" }
       });
@@ -640,7 +494,7 @@ describe(`Post Hook`, () => {
 
   describe("BaseMiddleware handler method", () => {
     beforeEach(() => {
-      instance1 = CreateInstance();
+      instance1 = CreateInstance({ DEBUG: true });
     });
 
     // it.only("should should force consume methods invocation (setEvent, setContext, responseObjectToThrow)", async () => {
@@ -683,8 +537,8 @@ describe(`Post Hook`, () => {
       const handlerPlusMiddleware = instance1(handler).use(
         BaseMiddleware({
           handler: async ({ getParams }) => {
-            const { event, setEvent } = getParams();
-            setEvent({ views: event.views + 1 });
+            const [event] = getParams();
+            event.views = event.views + 1;
           }
         })
       );
@@ -710,10 +564,10 @@ describe(`Post Hook`, () => {
         new Promise((resolve, reject) => {
           setTimeout(() => {
             try {
-              const { event, setEvent } = getParams();
+              const [event] = getParams();
               const { returnAndSendResponse } = getHelpers();
 
-              setEvent({ views: event.views + 1 });
+              event.views = event.views + 1;
               return returnAndSendResponse({
                 statusCode: 403,
                 message: `event views should be 3 and we got ${event.views}`
@@ -784,7 +638,7 @@ describe(`Auth Middleware`, () => {
 
       const handlerPlusMiddleware = instance1(handler).use(
         BaseMiddleware({
-          handler: ({ getParams }) => {
+          handler: () => {
             return new Promise((resolve, reject) => {
               setTimeout(() => {
                 try {
@@ -852,10 +706,8 @@ describe(`Auth Middleware`, () => {
       const handlerPlusMiddleware = instance1(handler).use(
         BaseMiddleware({
           handler: ({ getParams }) => {
-            const { event, setEvent } = getParams();
-            setEvent({
-              claims: { email: "tyrtyr" }
-            });
+            const [event] = getParams();
+            event.claims = { email: "tyrtyr" };
           }
         })
       );
@@ -872,8 +724,8 @@ describe(`Auth Middleware`, () => {
       const BaseMiddlewareWrapper = () => {
         return BaseMiddleware({
           handler: ({ getParams }) => {
-            const { setEvent } = getParams();
-            setEvent({ token: 123 });
+            const [event] = getParams();
+            event.token = 123;
           }
         });
       };
@@ -907,7 +759,9 @@ describe(`Auth Middleware`, () => {
     it(`should return new instance if instance is reused by passing different handler`, async () => {
       const BaseMiddlewareWrapper = () => {
         return BaseMiddleware({
-          handler: ({ getParams }) => getParams().setEvent({ token: 124 })
+          handler: ({ getParams }) => {
+            getParams()[0].token = 124;
+          }
         });
       };
 
@@ -992,101 +846,5 @@ describe(`Auth Middleware`, () => {
       });
       expect(res.prefix.body).toEqual("");
     });
-  });
-});
-
-describe(`Configure to be compatible with Express`, () => {
-  describe(`When an error or returnAndSendResponse is called, we call onCatch`, () => {
-    let instance1;
-    beforeEach(() => {
-      instance1 = CreateInstance({
-        DEBUG: true,
-        configure: {
-          augmentMethods: {
-            onCatch: (prevMethodwithArgs, { prevRawMethod, arg } = {}) => {
-              expect(prevMethodwithArgs()).toStrictEqual(prevRawMethod(arg));
-              return Object.assign({}, prevRawMethod(arg), {
-                headers: { "Access-Control-Allow-Origin": "*" }
-              });
-            }
-          }
-        }
-      });
-    });
-
-    it("should not be called when there is no error", async () => {
-      const fn = async (event, context) => {
-        return {
-          event,
-          context
-        };
-      };
-
-      const hookedHandler = instance1(fn);
-      const res = await hookedHandler({ body: 123 }, {});
-
-      expect(res).toStrictEqual({
-        event: {
-          body: 123
-        },
-        context: {}
-      });
-    });
-
-    it("should be able to call res.json upon error", async () => {
-      instance1 = CreateInstance({
-        DEBUG: true,
-        configure: {
-          augmentMethods: {
-            onCatch: (
-              prevMethodwithArgs,
-              { prevRawMethod, arg, context } = {}
-            ) => {
-              expect(prevMethodwithArgs()).toStrictEqual(prevRawMethod(arg));
-
-              const res = Object.assign({}, prevRawMethod(arg), {
-                extra: "field_added",
-                headers: { "Access-Control-Allow-Origin": "*" }
-              });
-              if (context && context.json) {
-                return context.json(res);
-              }
-
-              return res;
-            }
-          }
-        }
-      });
-
-      const fn = async (event, context) => {
-        return {
-          event
-        };
-      };
-
-      const hookedHandler = instance1(fn).use(
-        BaseMiddleware({
-          handler: async ({ getParams, getHelpers }) => {
-            const { event } = getParams();
-            if (event) {
-              getHelpers().returnAndSendResponse({
-                ...event
-              });
-            }
-          }
-        })
-      );
-      const res = await hookedHandler({ body: 123 }, mockedExpressResponse());
-
-      expect(res).toStrictEqual({
-        resJsoned: true,
-        body: 123,
-        extra: "field_added",
-        headers: { "Access-Control-Allow-Origin": "*" }
-      });
-    });
-
-    // it("should be called after onCatch", async () => {
-    // it("should be able to override/augment onCatch", async () => {
   });
 });

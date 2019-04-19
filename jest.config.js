@@ -1,6 +1,6 @@
 module.exports = {
-  roots: ["<rootDir>/tests"],
-  testRegex: "(.*\\.test.compiled\\.(js|tsx?|jsx?))$",
+  roots: ["<rootDir>/test"],
+  testRegex: "(.*\\.test\\.(js|tsx?|jsx?))$",
   transform: {
     "^.+\\.tsx?$": "ts-jest",
     "^.+\\.jsx?$": "babel-jest"
