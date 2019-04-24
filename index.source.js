@@ -1,7 +1,8 @@
-const SYMBOL_ERR_TYPE = Symbol("SYMBOL_ERR_TYPE");
-const SYMBOL_BEFOREHOOK_MIDDLEWARE_ID = Symbol(
-  "SYMBOL_BEFOREHOOK_MIDDLEWARE_ID"
+const SYMBOL_ERR_TYPE = Symbol("SYMBOL_BEFOREHOOK_ERR_TYPE");
+const SYMBOL_SHORT_CIRCUIT_TYPE = Symbol(
+  "SYMBOL_BEFOREHOOK_SHORT_CIRCUIT_TYPE"
 );
+const SYMBOL_MIDDLEWARE_ID = Symbol("SYMBOL_BEFOREHOOK_MIDDLEWARE_ID");
 
 const objectAssignIfExists = (...args) => {
   const def = { ...args[1] };
@@ -24,7 +25,7 @@ const MiddlewareHelpersInit = () => {
     logError: (...args) => args.forEach(l => console.error(l.message || l))
   };
 
-  const returnAndSendResponse = obj => {
+  const reply = obj => {
     /* eslint-disable-next-line no-param-reassign */
     const customError = Error(JSON.stringify(obj));
     customError[SYMBOL_ERR_TYPE] = true;
@@ -33,7 +34,7 @@ const MiddlewareHelpersInit = () => {
   };
 
   return () => ({
-    returnAndSendResponse,
+    reply,
     getLogger: () => pvtLogger
   });
 };
@@ -56,13 +57,34 @@ const clone = simpleClone; */
 
 const BaseMiddlewareHandlerInit = handler => {
   const dispatchFn = async (...args) => {
-    await handler(
-      {
-        getParams: () => args,
-        getHelpers: MiddlewareHelpersInit()
-      },
-      {}
-    );
+    try {
+      await handler(
+        {
+          getParams: () => args,
+          reply: obj => {
+            /* eslint-disable-next-line no-param-reassign */
+            const shortCircuitErrorObject = Error(JSON.stringify(obj));
+            shortCircuitErrorObject[SYMBOL_ERR_TYPE] = true;
+            shortCircuitErrorObject[SYMBOL_SHORT_CIRCUIT_TYPE] = "reply";
+
+            throw shortCircuitErrorObject;
+          },
+          next: () => {
+            const shortCircuitErrorObject = Error("next is called.");
+            shortCircuitErrorObject[SYMBOL_SHORT_CIRCUIT_TYPE] = "next";
+          },
+          getHelpers: MiddlewareHelpersInit()
+        },
+        {}
+      );
+    } catch (error) {
+      /* ignore, next() is called */
+      if (error[SYMBOL_SHORT_CIRCUIT_TYPE] === "next") {
+        return args;
+      }
+
+      throw error;
+    }
 
     return args;
   };
@@ -78,7 +100,7 @@ const BaseMiddleware = ({ handler, configure } = {}) => {
   let pre = async () => {};
   pre = BaseMiddlewareHandlerInit(handler);
 
-  pre[SYMBOL_BEFOREHOOK_MIDDLEWARE_ID] = true;
+  pre[SYMBOL_MIDDLEWARE_ID] = true;
 
   if (configure && configure.augmentMethods) {
     const { augmentMethods = {} } = configure;
@@ -155,27 +177,33 @@ const CreateInstance = options => {
     pvtLogger.logWarning = () => {};
   }
 
+  let onReturnObject = args => args;
+  const onReply = (...args) => onReturnObject(...args);
+
   let onCatch = (...args) => {
     const [e] = args;
 
     try {
       if (e[SYMBOL_ERR_TYPE] === true) {
-        return JSON.parse(e.message);
+        // if (e[SYMBOL_SHORT_CIRCUIT_TYPE] === "reply") {
+        //   return onReply(JSON.parse(e.message));
+        // }
+        return onReturnObject(JSON.parse(e.message));
       }
 
       pvtLogger.logError(e);
 
-      return {
+      return onReturnObject({
         statusCode: 500,
         body: `${e.message}`
-      };
+      });
     } catch (parseError) {
       pvtLogger.logError(parseError);
 
-      return {
+      return onReturnObject({
         statusCode: 500,
         body: `${parseError.message} - ${e && e.message ? e.message : ""}`
-      };
+      });
     }
   };
 
@@ -190,12 +218,26 @@ const CreateInstance = options => {
    * */
 
   const configure = ({ augmentMethods = {} } = {}) => {
-    const configurableMethods = ["onCatch", "handlerCallWrapper", "pvtLogger"];
+    const configurableMethods = [
+      "onCatch",
+      "onReturnObject",
+      "handlerCallWrapper",
+      "pvtLogger"
+    ];
 
     configurableMethods.forEach(fnName => {
       const newMethod = augmentMethods[fnName];
       if (typeof newMethod === "function") {
-        if (fnName === "onCatch") {
+        if (fnName === "onReturnObject") {
+          const oldMethod = onReturnObject;
+          onReturnObject = (arg1, params) => {
+            return newMethod(() => oldMethod(arg1), {
+              prevRawMethod: oldMethod,
+              arg: arg1,
+              ...params
+            });
+          };
+        } else if (fnName === "onCatch") {
           const oldMethod = onCatch;
           onCatch = (arg1, params) => {
             return newMethod(() => oldMethod(arg1), {
@@ -256,17 +298,8 @@ const CreateInstance = options => {
       }
       return FODispatch(...args);
     }
-
-    /* if (isHandlerFed === false && validateHandler(args[0]) === false) {
-      throw Error(
-        `DEPRECATED - Please use the exact argument names of the handler as the following event,context,callback or simply (event, context) => {} or () => {}`
-      );
-    } */
-
-    if (
-      isHandlerFed === true &&
-      args[0][SYMBOL_BEFOREHOOK_MIDDLEWARE_ID] !== true
-    ) {
+    
+    if (isHandlerFed === true && args[0][SYMBOL_MIDDLEWARE_ID] !== true) {
       /* then we assume this scenario calls for a new instance */
       return CreateInstance(options)(args[0]);
     }
@@ -279,9 +312,16 @@ const CreateInstance = options => {
   };
 
   FOInitBeforeHook.use = (...args) => {
+    if (!args || !args[0]) {
+      throw Error(
+        `.use expects an instance from BaseMiddleware. (Got type "${typeof args[0]}")`
+      );
+    }
+
     if (isHandlerFed === false) {
       throw Error("A handler needs to be fed first before calling .use");
     }
+
     if (args.length > 1) {
       pvtLogger.logWarning(
         `Ignoring 2nd argument. "use" method was called with more than 1 argument.`
@@ -295,7 +335,7 @@ const CreateInstance = options => {
 
     const middleware = args[0];
 
-    if (middleware[SYMBOL_BEFOREHOOK_MIDDLEWARE_ID] === true) {
+    if (middleware[SYMBOL_MIDDLEWARE_ID] === true) {
       stackedHooks.push(middleware);
     } else {
       throw Error(
@@ -326,6 +366,12 @@ const CreateInstance = options => {
         // const extensions = await hook(...args);
       }
     } catch (middlewaresThrow) {
+      if (middlewaresThrow[SYMBOL_SHORT_CIRCUIT_TYPE] === "reply") {
+        if (settings.stopOnCatch === true) {
+          return onReply(JSON.parse(middlewaresThrow.message));
+        }
+      }
+
       const catchHandlerToUse =
         typeof hookBeforeCatching.scrtOnCatch === "function"
           ? (err, params) =>

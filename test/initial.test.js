@@ -4,16 +4,9 @@ const jwt_decode = require("jwt-decode");
 const jwtdecodeAsyncHandler = CognitoDecodeVerifyJWTInit({
   jwt_decode
 }).UNSAFE_BUT_FAST_handler;
-const SYMBOL_BEFOREHOOK_MIDDLEWARE_ID = Symbol(
-  "SYMBOL_BEFOREHOOK_MIDDLEWARE_ID"
-);
 import { promisify } from "util";
 
-import {
-  CreateInstance,
-  BaseMiddleware,
-  BodyParserMiddleware
-} from "../index.js";
+import { CreateInstance, BaseMiddleware, BodyParserMiddleware } from "..";
 
 const isAsyncFunction = fn =>
   fn && fn.constructor && fn.constructor.name === "AsyncFunction";
@@ -39,9 +32,8 @@ const AuthMiddleware = ({ promisify, cognitoJWTDecodeHandler } = {}) => {
         }
       }
     },
-    handler: async ({ getParams, getHelpers }) => {
+    handler: async ({ getParams, reply }) => {
       const [event, context] = getParams();
-      const { returnAndSendResponse } = getHelpers();
 
       if (!event || !event.headers) return {};
 
@@ -63,7 +55,7 @@ const AuthMiddleware = ({ promisify, cognitoJWTDecodeHandler } = {}) => {
       );
 
       if (!claims || typeof claims.sub !== "string") {
-        return returnAndSendResponse({
+        reply({
           statusCode: 403,
           body: "Invalid Session",
           headers: { "Access-Control-Allow-Origin": "*" }
@@ -85,30 +77,14 @@ describe(`CreateInstance`, () => {
       instance1 = CreateInstance();
     });
 
-    it("should not throw error upon initialsation", () => {
-      // const expected = `Please use the exact argument names of the handler as the following event,context,callback or simply (event, context) => {} or () => {}`;
-      // try {
-      //   instance1(e => {});
-      // } catch (e) {
-      //   expect(e.message).toEqual(expect.stringContaining(expected));
-      // }
-    });
-
-    it("should only throw exception once the handler is called", () => {
-      // const expected = `Please use the exact argument names of the handler as the following event,context,callback or simply (event, context) => {} or () => {}`;
-      // try {
-      //   instance1(e => {});
-      // } catch (e) {
-      //   expect(e.message).toEqual(expect.stringContaining(expected));
-      // }
-    });
+    it("should not throw error upon initialsation", () => {});
   });
 });
 
 describe(`AsyncFunction support`, () => {
   describe("AsyncFunction handler", () => {
     let instance1 = CreateInstance();
-    beforeAll(() => {
+    beforeEach(() => {
       instance1 = CreateInstance();
     });
 
@@ -123,8 +99,6 @@ describe(`AsyncFunction support`, () => {
           context
         };
       };
-
-      await expect(() => instance1(basicAsyncHandler).not.toThrow());
 
       const asyncHandlerWithCW = instance1(basicAsyncHandler);
       const res1 = await asyncHandlerWithCW(
@@ -148,7 +122,7 @@ describe(`AsyncFunction support`, () => {
       instance1 = CreateInstance();
     });
 
-    it("should be accepted", () => {
+    it("should be accepted", async () => {
       const inv = BaseMiddleware({
         handler: async ({ getParams }) => {
           const [event] = getParams();
@@ -164,11 +138,8 @@ describe(`AsyncFunction support`, () => {
           }
         }
       });
-      inv[SYMBOL_BEFOREHOOK_MIDDLEWARE_ID] = true;
 
-      expect(() => {
-        instance1(async () => {}).use(inv)();
-      }).not.toThrow();
+      await expect(instance1(async () => {}).use(inv)()).resolves.toEqual();
     });
 
     it("should not throw when handler is a basic async fn", async () => {
@@ -179,7 +150,10 @@ describe(`AsyncFunction support`, () => {
         };
       };
 
-      await expect(() => instance1(basicAsyncHandler).not.toThrow());
+      await expect(instance1(basicAsyncHandler)()).resolves.toStrictEqual({
+        context: undefined,
+        event: undefined
+      });
 
       const asyncHandlerWithCW = instance1(basicAsyncHandler);
       const res1 = await asyncHandlerWithCW(
@@ -255,7 +229,7 @@ describe(`Error Handling`, () => {
       });
     });
 
-    it(`should cause the handler call to stop and return response at the middleware which invoked returnAndSendResponse`, async () => {
+    it(`should cause the handler call to reply at the middleware which invoked reply`, async () => {
       const handler = async (event, context) => {
         return {
           result: 2 + event.multiplier
@@ -265,10 +239,9 @@ describe(`Error Handling`, () => {
       const preHooked = instance12(handler)
         .use(
           BaseMiddleware({
-            handler: async ({ getHelpers }) => {
-              const { returnAndSendResponse } = getHelpers();
-              if (returnAndSendResponse || !returnAndSendResponse) {
-                returnAndSendResponse({
+            handler: async ({ reply }) => {
+              if (reply || !reply) {
+                reply({
                   statusCode: 1234,
                   body: "my custom data",
                   obj: {
@@ -284,10 +257,9 @@ describe(`Error Handling`, () => {
         )
         .use(
           BaseMiddleware({
-            handler: async ({ getHelpers }) => {
-              const { returnAndSendResponse } = getHelpers();
-              if (returnAndSendResponse || !returnAndSendResponse) {
-                returnAndSendResponse({
+            handler: async ({ reply }) => {
+              if (reply || !reply) {
+                reply({
                   statusCode: 500,
                   body: "testt"
                 });
@@ -310,7 +282,7 @@ describe(`Error Handling`, () => {
       instance12 = CreateInstance();
     });
 
-    it("should returnAndSendResponse by default", async () => {
+    it("should execution should stop from the current middleware by default", async () => {
       const handler = async (event, context) => {
         return {
           result: 2 + event.multiplier
@@ -353,7 +325,7 @@ describe(`Error Handling`, () => {
       });
     });
 
-    it("should returnAndSendResponse by default", async () => {
+    it("should stop by default", async () => {
       const handler = async (event, context) => {
         return {
           result: 2 + event.multiplier
@@ -560,19 +532,17 @@ describe(`Post Hook`, () => {
         return { event, context };
       };
 
-      const getP = (getParams, getHelpers) =>
+      const getP = (getParams, reply) =>
         new Promise((resolve, reject) => {
           setTimeout(() => {
             try {
               const [event] = getParams();
-              const { returnAndSendResponse } = getHelpers();
 
               event.views = event.views + 1;
-              return returnAndSendResponse({
+              reply({
                 statusCode: 403,
                 message: `event views should be 3 and we got ${event.views}`
               });
-              // resolve({});
             } catch (e) {
               reject(e);
             }
@@ -581,8 +551,8 @@ describe(`Post Hook`, () => {
 
       const handlerPlusMiddleware = instance1(handler).use(
         BaseMiddleware({
-          handler: async ({ getParams, getHelpers }) => {
-            await getP(getParams, getHelpers);
+          handler: async ({ getParams, reply }) => {
+            await getP(getParams, reply);
           }
         })
       );

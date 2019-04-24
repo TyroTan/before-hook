@@ -71,8 +71,6 @@ describe(`card-20369348 - Support dynamic handler arguments length.`, () => {
       };
 
       await main();
-
-      //   await expect(main()).not.toThrow();
     });
 
     describe(`BeforeHook - handler with more than 1 argument`, () => {
@@ -114,8 +112,6 @@ describe(`card-20369348 - Support dynamic handler arguments length.`, () => {
         };
 
         await main();
-
-        //   await expect(main()).not.toThrow();
       });
     });
   });
@@ -133,9 +129,266 @@ const mockedExpressResponse = () => {
   };
 };
 
-fdescribe(`Express JS.`, () => {
+describe(`onCatch and onReturnResponse.`, () => {
+  describe(`onCatch`, () => {
+    let instance1;
+
+    it(`should NOT be called when there is no "hook exception"`, async () => {
+      instance1 = CreateInstance({
+        DEBUG: true,
+        configure: {
+          augmentMethods: {
+            onCatch: (prevMethodwithArgs, { prevRawMethod, arg } = {}) => {
+              expect(prevMethodwithArgs()).toStrictEqual(prevRawMethod(arg));
+              return Object.assign({}, prevRawMethod(arg), {
+                headers: { "Access-Control-Allow-Origin": "*" }
+              });
+            }
+          }
+        }
+      });
+
+      const fn = async (event, context) => {
+        return {
+          event,
+          context
+        };
+      };
+
+      const withHook = instance1(fn).use(
+        BaseMiddleware({
+          handler: () => {}
+        })
+      );
+
+      const result = await withHook({}, {});
+      expect(result).toStrictEqual({
+        event: {},
+        context: {}
+      });
+    });
+
+    it("should be called upon hook exceptions - and return a json by default", async () => {
+      instance1 = CreateInstance({
+        DEBUG: true
+      });
+
+      const fn = async (event, context) => {
+        return {
+          event,
+          context
+        };
+      };
+
+      const withHook = instance1(fn).use(
+        BaseMiddleware({
+          handler: () => {
+            throw ReferenceError("developers error");
+          }
+        })
+      );
+
+      const result = await withHook({}, {});
+      expect(result.statusCode).toEqual(500);
+      expect(result).toStrictEqual({
+        statusCode: 500,
+        body: "developers error"
+      });
+    });
+
+    it("should call base onCatch upon hook exceptions", async () => {
+      instance1 = CreateInstance({
+        DEBUG: true,
+        configure: {
+          augmentMethods: {
+            onCatch: (prevMethodwithArgs, { prevRawMethod, arg } = {}) => {
+              expect(prevMethodwithArgs()).toStrictEqual(prevRawMethod(arg));
+              return Object.assign({}, prevRawMethod(arg), {
+                headers: { "Access-Control-Allow-Origin": "*" }
+              });
+            }
+          }
+        }
+      });
+
+      const fn = async (event, context) => {
+        return {
+          event,
+          context
+        };
+      };
+
+      const withHook = instance1(fn).use(
+        BaseMiddleware({
+          handler: () => {
+            throw ReferenceError("developers error");
+          }
+        })
+      );
+
+      const result = await withHook({}, {});
+      expect(result.statusCode).toEqual(500);
+      expect(result).toStrictEqual({
+        headers: { "Access-Control-Allow-Origin": "*" },
+        statusCode: 500,
+        body: "developers error"
+      });
+    });
+  });
+});
+
+describe(`Express JS.`, () => {
+  describe(`Short circuit functions onCatch, onReply, and onNext`, () => {
+    describe(`onCatch`, () => {
+      let withHook;
+      beforeEach(() => {
+        withHook = CreateInstance({
+          DEBUG: true,
+          configure: {
+            augmentMethods: {
+              onCatch: (prevMethodwithArgs, { prevRawMethod, arg } = {}) => {
+                return Object.assign({}, prevRawMethod(arg), {
+                  headers: { "Access-Control-Allow-Origin": "*" }
+                });
+              }
+            }
+          }
+        });
+      });
+
+      it("should be called when there is an exeption thrown", async () => {
+        let handler = async (event, context) => {
+          return {
+            event,
+            context
+          };
+        };
+
+        handler = withHook(handler).use(
+          BaseMiddleware({
+            handler: test1 => {
+              if (test1 || !test1) {
+                throw Error("test1");
+              }
+            }
+          })
+        );
+
+        const result = await handler(1, 3);
+        expect(result).toStrictEqual({
+          statusCode: 500,
+          body: "test1",
+          headers: { "Access-Control-Allow-Origin": "*" }
+        });
+      });
+
+      it("should NOT be called when there is no exeption thrown", async () => {
+        let handler = async (event, context) => {
+          return {
+            event,
+            context
+          };
+        };
+
+        handler = withHook(handler).use(
+          BaseMiddleware({
+            handler: () => {}
+          })
+        );
+
+        const result = await handler(1, 2);
+        expect(result.event).toEqual(1);
+        expect(result.context).toEqual(2);
+      });
+    });
+
+    describe(`reply`, () => {
+      let withHook;
+      beforeEach(() => {
+        withHook = CreateInstance({
+          DEBUG: true,
+          configure: {
+            augmentMethods: {
+              onCatch: (prevMethodwithArgs, { prevRawMethod, arg } = {}) => {
+                return Object.assign({}, prevRawMethod(arg), {
+                  headers: { "Access-Control-Allow-Origin": "*" }
+                });
+              }
+            }
+          }
+        });
+      });
+
+      it("should not trigger onCatch", async () => {
+        let handler = async (event, context) => {
+          return {
+            event,
+            context
+          };
+        };
+
+        handler = withHook(handler).use(
+          BaseMiddleware({
+            handler: ({ reply }) => {
+              reply({
+                num: 123,
+                letter: ["a", "z"]
+              });
+            }
+          })
+        );
+
+        const result = await handler(1, 2);
+
+        expect(result).toStrictEqual({
+          num: 123,
+          letter: ["a", "z"]
+        });
+      });
+
+      it("should trigger onReturnObject", async () => {
+        withHook = CreateInstance({
+          DEBUG: true,
+          configure: {
+            augmentMethods: {
+              onReturnObject: () => {
+                return {
+                  one: "1"
+                };
+              }
+            }
+          }
+        });
+
+        let handler = (event, context) => {
+          return {
+            event,
+            context
+          };
+        };
+
+        handler = withHook(handler).use(
+          BaseMiddleware({
+            handler: ({ reply }) => {
+              reply({
+                num: 123,
+                letter: ["a", "z"]
+              });
+            }
+          })
+        );
+
+        const result = await handler(1, 2);
+
+        expect(result).toStrictEqual({
+          one: "1"
+        });
+      });
+    });
+  });
+
   describe(`Configure to be compatible with Express`, () => {
-    describe(`When an error or returnAndSendResponse is called, we call onCatch`, () => {
+    describe(`When an error but not "reply" is triggered, we call onCatch`, () => {
       let instance1;
       beforeEach(() => {
         instance1 = CreateInstance({
@@ -188,7 +441,7 @@ fdescribe(`Express JS.`, () => {
                   extra: "field_added",
                   headers: { "Access-Control-Allow-Origin": "*" }
                 });
-                
+
                 if (res && res.json) {
                   return res.json(result);
                 }
@@ -207,21 +460,20 @@ fdescribe(`Express JS.`, () => {
 
         const hookedHandler = instance1(fn).use(
           BaseMiddleware({
-            handler: async ({ getParams, getHelpers }) => {
+            handler: async ({ getParams }) => {
               const [event] = getParams();
               if (event) {
-                getHelpers().returnAndSendResponse({
-                  ...event
-                });
+                throw Error("test");
               }
             }
           })
         );
-        const res = await hookedHandler({ "body": 123 }, mockedExpressResponse());
-
+        const res = await hookedHandler({ body: 123 }, mockedExpressResponse());
+        
         expect(res).toStrictEqual({
+          statusCode: 500,
           resJsoned: true,
-          body: 123,
+          body: 'test',
           extra: "field_added",
           headers: { "Access-Control-Allow-Origin": "*" }
         });
