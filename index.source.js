@@ -1,11 +1,8 @@
-const MIDDLEWARE_PREFIX = "BEFORE_HOOK_";
-const MIDDLEWARE_CONSTANTS = {
-  HTTP_RESPONSE: `${MIDDLEWARE_PREFIX}HTTP_RESPONSE`
-};
-
-const isAsyncFunction = fn => {
-  return fn.constructor.name === "AsyncFunction";
-};
+const SYMBOL_ERR_TYPE = Symbol("SYMBOL_BEFOREHOOK_ERR_TYPE");
+const SYMBOL_SHORT_CIRCUIT_TYPE = Symbol(
+  "SYMBOL_BEFOREHOOK_SHORT_CIRCUIT_TYPE"
+);
+const SYMBOL_MIDDLEWARE_ID = Symbol("SYMBOL_BEFOREHOOK_MIDDLEWARE_ID");
 
 const objectAssignIfExists = (...args) => {
   const def = { ...args[1] };
@@ -19,71 +16,6 @@ const objectAssignIfExists = (...args) => {
   return { ...args[0], ...def };
 };
 
-const getHandlerArgumentsLength = handler => {
-  let result = -1;
-  try {
-    if (typeof handler !== "function")
-      throw Error(`Handler must be a function. type '${typeof handler}'`);
-
-    const def = handler.toString();
-    const removeCommentsRegex = new RegExp(
-      /\/\*[\s\S]*?\*\/|([^\\:]|^)\/\/.*$/gm
-    );
-    const noSpaceAndComments = def
-      .replace(removeCommentsRegex, "")
-      .replace(new RegExp("(\\s|\\n)", "g"), "");
-
-    const commasRegExp = new RegExp(`\\,`, "g");
-
-    const match = noSpaceAndComments.match(commasRegExp);
-    if (!match) {
-      result = noSpaceAndComments.indexOf("()") > -1 ? 0 : 1;
-    } else {
-      result = match.length + 1;
-    }
-  } catch (e) {
-    console.error(`__getArgumentsLength__. ${e.message}`);
-  }
-
-  return result;
-};
-
-const validateHandler = handler => {
-  if (typeof handler !== "function")
-    throw TypeError(
-      `Handler must be a function${typeof handler} ${Object.keys(
-        handler
-      ).reduce((acc, cur) => `${acc} ${cur}`, "")}`
-    );
-
-  const count = getHandlerArgumentsLength(handler);
-  return count >= 0 || count <= 1;
-};
-
-const readError = e => {
-  let isMiddlewareHTTPResponse = false;
-  try {
-    const objError =
-      typeof e.message === "object" ? e.message : JSON.parse(e.message);
-
-    isMiddlewareHTTPResponse =
-      objError.type === MIDDLEWARE_CONSTANTS.HTTP_RESPONSE;
-
-    const { responseObject } = objError;
-    if (typeof responseObject === "undefined") {
-      throw Error(`Invalid custom "responseObject"`);
-    }
-
-    return {
-      e,
-      isMiddlewareHTTPResponse,
-      responseObject
-    };
-  } catch (err) {
-    return { e, err, errorMessage: `${e.message} - ${err.message}` };
-  }
-};
-
 const MiddlewareHelpersInit = () => {
   const pvtLogger = {
     /* eslint-disable-next-line no-console */
@@ -93,70 +25,71 @@ const MiddlewareHelpersInit = () => {
     logError: (...args) => args.forEach(l => console.error(l.message || l))
   };
 
-  const returnAndSendResponse = obj => {
-    let stringErr = "";
-    try {
-      const errorObj = {
-        type: MIDDLEWARE_CONSTANTS.HTTP_RESPONSE,
-        responseObject: obj
-      };
-      stringErr = JSON.stringify({ ...errorObj });
-    } catch (e) {
-      if (pvtLogger && typeof pvtLogger.logError === "function") {
-        pvtLogger.logError(e);
-      }
-      throw e;
-    }
+  const reply = obj => {
+    /* eslint-disable-next-line no-param-reassign */
+    const customError = Error(JSON.stringify(obj));
+    customError[SYMBOL_ERR_TYPE] = true;
 
-    throw Error(stringErr);
+    throw customError;
   };
 
   return () => ({
-    returnAndSendResponse,
+    reply,
     getLogger: () => pvtLogger
   });
 };
 
-const setState = (objs, state) => {
+/* deprecated const setState = (objs, oldState, state) => {
+  const mutatedOldState = oldState;
   const newState = state;
 
-  // console.log("state", state);
   Object.keys(objs).forEach(key => {
     newState[key] = objs[key];
+    mutatedOldState[key] = objs[key];
   });
 
-  // console.log("new state", newState);
-  return newState;
+  return mutatedOldState;
 };
-const setContext = setState;
-const simpleClone = objectToClone => JSON.parse(JSON.stringify(objectToClone));
-const clone = simpleClone;
+const setContext = setState; */
+/* deprecated const simpleClone = objectToClone =>
+  /* JSON.parse(JSON.stringify( * / objectToClone; /* )) * /
+const clone = simpleClone; */
 
 const BaseMiddlewareHandlerInit = handler => {
-  const fn = async (event, context) => {
-    const pvtEvent = event ? clone(event) : "";
-    const pvtContext = context ? clone(context) : "";
+  const dispatchFn = async (...args) => {
+    try {
+      await handler(
+        {
+          getParams: () => args,
+          reply: obj => {
+            /* eslint-disable-next-line no-param-reassign */
+            const shortCircuitErrorObject = Error(JSON.stringify(obj));
+            shortCircuitErrorObject[SYMBOL_ERR_TYPE] = true;
+            shortCircuitErrorObject[SYMBOL_SHORT_CIRCUIT_TYPE] = "reply";
 
-    await handler(
-      {
-        getParams: () => ({
-          event: pvtEvent,
-          setEvent: objs => setState(objs, pvtEvent),
-          context: pvtContext,
-          setContext: objs => setContext(objs, pvtContext)
-        }),
-        getHelpers: MiddlewareHelpersInit()
-      },
-      {}
-    );
+            throw shortCircuitErrorObject;
+          },
+          next: () => {
+            const shortCircuitErrorObject = Error("next is called.");
+            shortCircuitErrorObject[SYMBOL_SHORT_CIRCUIT_TYPE] = "next";
+          },
+          getHelpers: MiddlewareHelpersInit()
+        },
+        {}
+      );
+    } catch (error) {
+      /* ignore, next() is called */
+      if (error[SYMBOL_SHORT_CIRCUIT_TYPE] === "next") {
+        return args;
+      }
 
-    return {
-      event: pvtEvent,
-      context: pvtContext
-    };
+      throw error;
+    }
+
+    return args;
   };
 
-  return fn;
+  return dispatchFn;
 };
 
 const BaseMiddleware = ({ handler, configure } = {}) => {
@@ -167,21 +100,20 @@ const BaseMiddleware = ({ handler, configure } = {}) => {
   let pre = async () => {};
   pre = BaseMiddlewareHandlerInit(handler);
 
-  pre.isHookMiddleware = true;
+  pre[SYMBOL_MIDDLEWARE_ID] = true;
 
   if (configure && configure.augmentMethods) {
     const { augmentMethods = {} } = configure;
-    const configurableMethods = ["onCatchHandler"];
+    const configurableMethods = ["onCatch"];
 
     configurableMethods.forEach(fnName => {
       const newMethod = augmentMethods[fnName];
 
       if (typeof newMethod === "function") {
-        if (fnName === "onCatchHandler") {
-
-          pre.scrtOnCatchHandler = (oldMethod, e) => {
+        if (fnName === "onCatch") {
+          pre.scrtOnCatch = (oldMethod, e) => {
             return newMethod(() => oldMethod(e), {
-              prevMethodwithNoArgs: oldMethod,
+              prevRawMethod: oldMethod,
               arg: e
             });
           };
@@ -196,70 +128,10 @@ const BaseMiddleware = ({ handler, configure } = {}) => {
 const BodyParserMiddleware = () => {
   return BaseMiddleware({
     handler: async ({ getParams }) => {
-      const { event, setEvent } = getParams();
+      const [event] = getParams();
       if (Object.keys({ ...event.body }).length) {
-        setEvent({ body: JSON.parse(event.body) });
+        event.body = JSON.parse(event.body);
       }
-    }
-  });
-};
-
-const AuthMiddleware = ({ promisify, cognitoJWTDecodeHandler } = {}) => {
-  if (
-    (promisify && typeof promisify !== "function") ||
-    (cognitoJWTDecodeHandler && typeof cognitoJWTDecodeHandler !== "function")
-  ) {
-    throw Error(
-      `invalid (promisify and cognitoJWTDecodeHandler) passed. ${typeof promisify},  ${typeof cognitoJWTDecodeHandler}`
-    );
-  }
-
-  return BaseMiddleware({
-    configure: {
-      augmentMethods: {
-        onCatchHandler: () => {
-          return {
-            statusCode: 403,
-            body: "Invalid Session",
-            headers: { "Access-Control-Allow-Origin": "*" }
-          };
-        }
-      }
-    },
-    handler: async ({ getParams, getHelpers }) => {
-      const { event, setEvent, context } = getParams();
-      const { returnAndSendResponse } = getHelpers();
-
-      if (!event || !event.headers) return {};
-
-      const newEventHeaders = {
-        ...event.headers
-      };
-
-      if (!newEventHeaders.Authorization) {
-        newEventHeaders.Authorization = newEventHeaders.authorization;
-      }
-
-      let promised = cognitoJWTDecodeHandler;
-      if (!isAsyncFunction(promised)) {
-        promised = promisify(promised);
-      }
-      const claims = await promised(
-        Object.assign({}, event, { headers: newEventHeaders }),
-        context
-      );
-
-      if (!claims || typeof claims.sub !== "string") {
-        return returnAndSendResponse({
-          statusCode: 403,
-          body: "Invalid Session",
-          headers: { "Access-Control-Allow-Origin": "*" }
-        });
-      }
-
-      setEvent({ user: claims });
-
-      return {};
     }
   });
 };
@@ -267,8 +139,7 @@ const AuthMiddleware = ({ promisify, cognitoJWTDecodeHandler } = {}) => {
 const CreateInstance = options => {
   let settings = {
     DEBUG: false,
-    stopOnCatch: true,
-    silent: false
+    stopOnCatch: true
   };
 
   settings = objectAssignIfExists({}, settings, options);
@@ -276,15 +147,16 @@ const CreateInstance = options => {
   let pvtDispatched = false;
   const stackedHooks = [];
   let isHandlerFed = false;
+  let handlerLength = -1;
 
   let handler = async () => {};
-  let FOInvokeMiddlewares = async () => {};
+  let FODispatch = async () => {};
 
-  /**
+  /*
    *
    * CONFIGURABLES - START
    *
-  **/
+   */
 
   let pvtLogger = {
     /* eslint-disable-next-line no-console */
@@ -293,30 +165,46 @@ const CreateInstance = options => {
     /* eslint-disable-next-line no-console */
     logError: (...args) => args.forEach(l => console.error(l.message || l)),
 
-    /* eslint-disable-next-line no-console */
     logWarning: (...args) =>
+      /* eslint-disable-next-line no-console */
       args.forEach(l => console.error(`WARNING: ${l.message || l}`))
   };
 
-  if (settings.DEBUG !== true || settings.silent === true) {
+  /* logs are off by default */
+  if (settings.DEBUG !== true) {
     pvtLogger.log = () => {};
     pvtLogger.logError = () => {};
     pvtLogger.logWarning = () => {};
   }
 
-  let onCatchHandler = e => {
-    if (pvtLogger && typeof pvtLogger.logError === "function") {
-      pvtLogger.logError(e);
-    }
+  let onReturnObject = args => args;
+  const onReply = (...args) => onReturnObject(...args);
 
-    const read = readError(e);
-    if (read.isMiddlewareHTTPResponse === true) {
-      return read.responseObject;
+  let onCatch = (...args) => {
+    const [e] = args;
+
+    try {
+      if (e[SYMBOL_ERR_TYPE] === true) {
+        // if (e[SYMBOL_SHORT_CIRCUIT_TYPE] === "reply") {
+        //   return onReply(JSON.parse(e.message));
+        // }
+        return onReturnObject(JSON.parse(e.message));
+      }
+
+      pvtLogger.logError(e);
+
+      return onReturnObject({
+        statusCode: 500,
+        body: `${e.message}`
+      });
+    } catch (parseError) {
+      pvtLogger.logError(parseError);
+
+      return onReturnObject({
+        statusCode: 500,
+        body: `${parseError.message} - ${e && e.message ? e.message : ""}`
+      });
     }
-    return {
-      statusCode: 500,
-      body: `${read.errorMessage}`
-    };
   };
 
   let handlerCallWrapper = (...args) => {
@@ -327,11 +215,12 @@ const CreateInstance = options => {
    *
    * CONFIGURABLES - END
    *
-  **/
+   * */
 
   const configure = ({ augmentMethods = {} } = {}) => {
     const configurableMethods = [
-      "onCatchHandler",
+      "onCatch",
+      "onReturnObject",
       "handlerCallWrapper",
       "pvtLogger"
     ];
@@ -339,19 +228,29 @@ const CreateInstance = options => {
     configurableMethods.forEach(fnName => {
       const newMethod = augmentMethods[fnName];
       if (typeof newMethod === "function") {
-        if (fnName === "onCatchHandler") {
-          const oldMethod = onCatchHandler;
-          onCatchHandler = e => {
-            return newMethod(() => oldMethod(e), {
-              prevMethodwithNoArgs: oldMethod,
-              arg: e
+        if (fnName === "onReturnObject") {
+          const oldMethod = onReturnObject;
+          onReturnObject = (arg1, params) => {
+            return newMethod(() => oldMethod(arg1), {
+              prevRawMethod: oldMethod,
+              arg: arg1,
+              ...params
+            });
+          };
+        } else if (fnName === "onCatch") {
+          const oldMethod = onCatch;
+          onCatch = (arg1, params) => {
+            return newMethod(() => oldMethod(arg1), {
+              prevRawMethod: oldMethod,
+              arg: arg1,
+              ...params
             });
           };
         } else if (fnName === "handlerCallWrapper") {
           const oldMethod = handlerCallWrapper;
           handlerCallWrapper = e => {
             return newMethod(() => oldMethod(e), {
-              prevMethodwithNoArgs: oldMethod,
+              prevRawMethod: oldMethod,
               arg: e
             });
           };
@@ -359,7 +258,7 @@ const CreateInstance = options => {
           const oldMethod = pvtLogger;
           pvtLogger = e => {
             return newMethod(() => oldMethod(e), {
-              prevMethodwithNoArgs: oldMethod,
+              prevRawMethod: oldMethod,
               arg: e
             });
           };
@@ -375,23 +274,32 @@ const CreateInstance = options => {
 
   /**
    *
-   * CORE - START
+   * CONFIGURABLES - START
    *
-  **/
+   * */
 
-  /** Function Object Init "Before Hook" **/
+  /* Function Object Init "Before Hook" */
   const FOInitBeforeHook = (...args) => {
+    if (isHandlerFed === true) {
+      handlerLength = handler.length;
+    }
+
+    if (typeof args[0] === "undefined") {
+      pvtLogger.logWarning(`"undefined" is probably not expected here.`);
+    }
+
     if (typeof args[0] !== "function") {
-      return FOInvokeMiddlewares(...args);
+      if (handlerLength > -1 && handlerLength !== args.length) {
+        pvtLogger.logWarning(
+          `Dispatching with ${
+            args.length
+          } args while the original handler has ${handlerLength}.`
+        );
+      }
+      return FODispatch(...args);
     }
-
-    if (isHandlerFed === false && validateHandler(args[0]) === false) {
-      throw Error(
-        `DEPRECATED - Please use the exact argument names of the handler as the following event,context,callback or simply (event, context) => {} or () => {}`
-      );
-    }
-
-    if (isHandlerFed === true && args[0].isHookMiddleware !== true) {
+    
+    if (isHandlerFed === true && args[0][SYMBOL_MIDDLEWARE_ID] !== true) {
       /* then we assume this scenario calls for a new instance */
       return CreateInstance(options)(args[0]);
     }
@@ -400,20 +308,24 @@ const CreateInstance = options => {
 
     isHandlerFed = true;
 
-    return FOInvokeMiddlewares;
+    return FODispatch;
   };
 
   FOInitBeforeHook.use = (...args) => {
-    const middleware = args[0];
+    if (!args || !args[0]) {
+      throw Error(
+        `.use expects an instance from BaseMiddleware. (Got type "${typeof args[0]}")`
+      );
+    }
+
     if (isHandlerFed === false) {
       throw Error("A handler needs to be fed first before calling .use");
     }
+
     if (args.length > 1) {
-      if (pvtLogger && typeof pvtLogger.logWarning === "function") {
-        pvtLogger.logWarning(
-          `Ignoring 2nd argument. "use" method was called with more than 1 argument.`
-        );
-      }
+      pvtLogger.logWarning(
+        `Ignoring 2nd argument. "use" method was called with more than 1 argument.`
+      );
     }
     if (pvtDispatched === true) {
       throw Error(
@@ -421,11 +333,13 @@ const CreateInstance = options => {
       );
     }
 
-    if (middleware.isHookMiddleware === true) {
+    const middleware = args[0];
+
+    if (middleware[SYMBOL_MIDDLEWARE_ID] === true) {
       stackedHooks.push(middleware);
     } else {
       throw Error(
-        "Unknown middlewares are not yet supported. Please extend `Base` middleware instead."
+        "Unknown middleware. Middlewares must extend BaseMiddleware."
       );
     }
 
@@ -438,9 +352,7 @@ const CreateInstance = options => {
 
   FOInitBeforeHook.getLogger = () => pvtLogger;
 
-  FOInvokeMiddlewares = async (event, context) => {
-    let extendedEvent = event;
-    let extendedContext = context;
+  FODispatch = async (...args) => {
     let hookBeforeCatching = {};
     pvtDispatched = true;
 
@@ -448,57 +360,52 @@ const CreateInstance = options => {
       /* eslint-disable-next-line no-restricted-syntax */
       for (const hook of stackedHooks) {
         hookBeforeCatching = hook;
+
         /* eslint-disable-next-line no-await-in-loop */
-        const extensions = await hook(extendedEvent, extendedContext);
-
-        if (extensions.event) {
-          extendedEvent = Object.assign({}, extendedEvent, extensions.event);
-        }
-
-        if (extensions.context) {
-          extendedContext = Object.assign(
-            {},
-            extendedContext,
-            extensions.context
-          );
+        await hook(...args);
+        // const extensions = await hook(...args);
+      }
+    } catch (middlewaresThrow) {
+      if (middlewaresThrow[SYMBOL_SHORT_CIRCUIT_TYPE] === "reply") {
+        if (settings.stopOnCatch === true) {
+          return onReply(JSON.parse(middlewaresThrow.message));
         }
       }
-    } catch (e) {
+
       const catchHandlerToUse =
-        typeof hookBeforeCatching.scrtOnCatchHandler === "function"
-          ? err => hookBeforeCatching.scrtOnCatchHandler(onCatchHandler, err)
-          : onCatchHandler;
+        typeof hookBeforeCatching.scrtOnCatch === "function"
+          ? (err, params) =>
+              hookBeforeCatching.scrtOnCatch(e => onCatch(e, params), err)
+          : (err, params) => onCatch(err, params);
       if (settings.stopOnCatch === true) {
-        return catchHandlerToUse(e);
+        return catchHandlerToUse(middlewaresThrow, {
+          getParams: () => args
+        });
       }
-      catchHandlerToUse(e);
+      catchHandlerToUse(middlewaresThrow, {
+        getParams: () => args
+      });
     }
 
-    return handlerCallWrapper(extendedEvent, extendedContext);
+    return handlerCallWrapper(...args);
   };
 
-  /* copy properties of FOInitBeforeHook to FOInvokeMiddlewares - so we can chain .use and etc */
+  /* copy properties of FOInitBeforeHook to FODispatch - so we can chain .use and etc */
   Object.keys(FOInitBeforeHook).forEach(method => {
-    FOInvokeMiddlewares[method] = FOInitBeforeHook[method];
+    FODispatch[method] = FOInitBeforeHook[method];
   });
 
   /**
    *
    * CORE - END
    *
-  **/
+   * */
 
   return FOInitBeforeHook;
 };
 
-export {
-  MIDDLEWARE_CONSTANTS,
-  BaseMiddleware,
-  BodyParserMiddleware,
-  AuthMiddleware,
-  CreateInstance,
-  getHandlerArgumentsLength,
-  validateHandler
-};
+export { BaseMiddleware, BodyParserMiddleware, CreateInstance };
+
+export default CreateInstance;
 
 export default CreateInstance;
