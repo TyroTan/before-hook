@@ -1,9 +1,12 @@
 const CognitoDecodeVerifyJWTInit = require("./token-decode-test-version");
 
 const jwt_decode = require("jwt-decode");
-const jwtdecodeAsyncHandler = CognitoDecodeVerifyJWTInit({
+const {
+  UNSAFE_BUT_FAST_handler,
+  UNSAFE_BUT_FAST_handler_failing
+} = CognitoDecodeVerifyJWTInit({
   jwt_decode
-}).UNSAFE_BUT_FAST_handler;
+});
 import { promisify } from "util";
 
 import { CreateInstance, BaseMiddleware, BodyParserMiddleware } from "..";
@@ -23,12 +26,14 @@ const AuthMiddleware = ({ promisify, cognitoJWTDecodeHandler } = {}) => {
   return BaseMiddleware({
     configure: {
       augmentMethods: {
-        onCatch: () => {
-          return {
+        onCatch: (...args) => {
+          const { prevRawMethod } = args[1];
+
+          return prevRawMethod({
             statusCode: 403,
             body: "Invalid Session",
             headers: { "Access-Control-Allow-Origin": "*" }
-          };
+          });
         }
       }
     },
@@ -131,7 +136,7 @@ describe(`AsyncFunction support`, () => {
           event.headers.Authorization = !event.headers.Authorization
             ? event.headers.authorization
             : event.headers.Authorization;
-          const promised = promisify(jwtdecodeAsyncHandler);
+          const promised = promisify(UNSAFE_BUT_FAST_handler);
           const claims = await promised(event, context);
           if (claims && claims.sub && typeof claims.sub === "string") {
             event.user = claims;
@@ -587,7 +592,29 @@ describe(`Auth Middleware`, () => {
       const handlerPlusMiddleware = instance1(handler).use(
         AuthMiddleware({
           promisify,
-          cognitoJWTDecodeHandler: jwtdecodeAsyncHandler
+          cognitoJWTDecodeHandler: UNSAFE_BUT_FAST_handler
+        })
+      );
+
+      const res = await handlerPlusMiddleware({
+        headers: {
+          Authorization: "token"
+        }
+      });
+
+      expect(res).toBeDefined();
+      expect(res.statusCode).toEqual(403);
+    });
+
+    it("should return empty event.user when auth failed and statusCode 403 (string error)", async () => {
+      const handler = event => {
+        return { event };
+      };
+
+      const handlerPlusMiddleware = instance1(handler).use(
+        AuthMiddleware({
+          promisify,
+          cognitoJWTDecodeHandler: UNSAFE_BUT_FAST_handler_failing
         })
       );
 

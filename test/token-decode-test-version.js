@@ -23,6 +23,18 @@ const CognitoDecodeVerifyJWTInit = ({ jwt_decode }) => {
           return callback(msg, msg);
         }
       }, 1);
+    },
+    UNSAFE_BUT_FAST_handler_failing: (event, context, callback) => {
+      setTimeout(() => {
+        try {
+          if (event || !event) {
+            return callback("invalid a");
+          }
+        } catch (e) {
+          const msg = e && e.message ? `${e.message}` : e;
+          return callback(msg, msg);
+        }
+      }, 1);
     }
   };
 };

@@ -117,6 +117,118 @@ describe(`card-20369348 - Support dynamic handler arguments length.`, () => {
   });
 });
 
+describe(`issue-1 - Allow passing an array of handlers to beforeHook.`, () => {
+  describe(`BeforeHook - handler with 1 argument`, () => {
+    let beforeHook;
+    beforeEach(() => {
+      beforeHook = CreateInstance({ DEBUG: true });
+    });
+
+    it(`should accept a mixed type of handler.`, async () => {
+      let handler1 = async (object1, object2) => ({ object1, object2 });
+      let handler2 = async (_, { fn }) => {
+        return fn(1, 2);
+      };
+      let handler3 = ({ num }) => num ** 2;
+
+      [handler1, handler2, handler3] = beforeHook([
+        handler1,
+        handler2,
+        handler3
+      ]).use(
+        BaseMiddleware({
+          handler: ({ getParams }) => {
+            const [arg1, arg2] = getParams();
+
+            if (arg1 === null) {
+              arg2.fn = (num1, num2) => num1 * 5 + num2 ** 3;
+            } else if (!arg1.num) {
+              arg1.val = 123;
+              arg2.val = 456;
+            } else {
+              arg1.num = 5;
+            }
+          }
+        })
+      );
+
+      const res1 = await handler2(null, { fn: (n1, n2) => n1 + n2 });
+      const res2 = await handler1({}, {});
+      const res3 = await handler3({ num: 4 });
+      expect(res1).toStrictEqual(13);
+      expect(res2).toStrictEqual({
+        object1: { val: 123 },
+        object2: { val: 456 }
+      });
+      expect(res3).toStrictEqual(25);
+    });
+
+    it(`should allow .use for more hook per resulting handler.`, async () => {
+      const fetchObject = () =>
+        new Promise(resolve => {
+          setTimeout(() => {
+            return resolve({
+              num1: 10,
+              num2: 20
+            });
+          }, 300);
+        });
+
+      let [handler1, handler2] = beforeHook([
+        async (event, context) => {
+          return {
+            event,
+            context
+          };
+        },
+        async (event, context) => {
+          return {
+            event,
+            context
+          };
+        }
+      ]).use(
+        BaseMiddleware({
+          handler: async ({ getParams }) => {
+            const [event, context] = getParams();
+            event.val = await fetchObject();
+          }
+        })
+      );
+
+      handler2 = handler2
+        .use(
+          BaseMiddleware({
+            handler: ({ getParams }) => {
+              const [event, context] = getParams();
+              context.v = 5;
+            }
+          })
+        )
+        .use(
+          BaseMiddleware({
+            handler: ({ getParams }) => {
+              const [event, context] = getParams();
+              context.v *= 5;
+            }
+          })
+        );
+
+      const res1 = await handler1({}, {});
+      const res2 = await handler2({}, {});
+
+      expect(res1).toStrictEqual({
+        event: { val: { num1: 10, num2: 20 } },
+        context: {}
+      });
+      expect(res2).toStrictEqual({
+        event: { val: { num1: 10, num2: 20 } },
+        context: { v: 25 }
+      });
+    });
+  });
+});
+
 const mockedExpressResponse = () => {
   return {
     send: (code, data) => ({
@@ -469,11 +581,11 @@ describe(`Express JS.`, () => {
           })
         );
         const res = await hookedHandler({ body: 123 }, mockedExpressResponse());
-        
+
         expect(res).toStrictEqual({
           statusCode: 500,
           resJsoned: true,
-          body: 'test',
+          body: "test",
           extra: "field_added",
           headers: { "Access-Control-Allow-Origin": "*" }
         });
