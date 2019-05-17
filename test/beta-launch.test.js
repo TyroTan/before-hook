@@ -1,5 +1,8 @@
-import { CreateInstance, BaseMiddleware } from "../index";
+import { CreateInstance, BaseMiddleware } from "..";
+import { ResponseResource } from "../middlewares";
+// import cors from "cors";
 import { promisify } from "util";
+// import assert from "assert";
 
 describe(`card-20369348 - Support dynamic handler arguments length.`, () => {
   describe(`BeforeHook - handler with 1 argument`, () => {
@@ -225,6 +228,47 @@ describe(`issue-1 - Allow passing an array of handlers to beforeHook.`, () => {
         event: { val: { num1: 10, num2: 20 } },
         context: { v: 25 }
       });
+    });
+
+    it(`should work if called with mixtures of params; type fn and array.`, async () => {
+      let handler1 = async (object1, object2) => ({ object1, object2 });
+      let handler2 = async (_, { fn }) => {
+        return fn(1, 2);
+      };
+      let handler3 = ({ num }) => num ** 2;
+
+
+      const _ = beforeHook(handler1);
+      [handler1, handler2, handler3] = beforeHook.getNew([
+        handler1,
+        handler2,
+        handler3
+      ]).use(
+        BaseMiddleware({
+          handler: ({ getParams }) => {
+            const [arg1, arg2] = getParams();
+
+            if (arg1 === null) {
+              arg2.fn = (num1, num2) => num1 * 5 + num2 ** 3;
+            } else if (!arg1.num) {
+              arg1.val = 123;
+              arg2.val = 456;
+            } else {
+              arg1.num = 5;
+            }
+          }
+        })
+      );
+
+      const res1 = await handler2(null, { fn: (n1, n2) => n1 + n2 });
+      const res2 = await handler1({}, {});
+      const res3 = await handler3({ num: 4 });
+      expect(res1).toStrictEqual(13);
+      expect(res2).toStrictEqual({
+        object1: { val: 123 },
+        object2: { val: 456 }
+      });
+      expect(res3).toStrictEqual(25);
     });
   });
 });
@@ -593,6 +637,45 @@ describe(`Express JS.`, () => {
 
       // it("should be called after onCatch", async () => {
       // it("should be able to override/augment onCatch", async () => {
+    });
+  });
+});
+
+describe(`Plugin/Resource`, () => {
+  // describe(`Plugin`, () => {
+  describe(`Resource`, () => {
+    describe(`Response Object (express-like)`, () => {
+      let withHook;
+      beforeEach(() => {
+        withHook = CreateInstance({
+          DEBUG: true,
+          register: [ResponseResource()]
+        });
+      });
+
+      it("test1", async () => {
+        let handler = async event => {
+          return event.responseJson({ four: 4 });
+        };
+
+        [handler] = withHook.getNew([handler]).use(
+          BaseMiddleware({
+            handler: async ({ getParams }, { response }) => {
+              const [event] = getParams();
+              response.setHeader("cus", "1");
+              event.responseJson = response.json;
+            }
+          })
+        );
+
+        const result = await handler({});
+
+        expect(result).toStrictEqual({
+          "Content-Type": "application/json",
+          "cus": "1",
+          body: JSON.stringify({"four": 4})
+        });
+      });
     });
   });
 });

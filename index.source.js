@@ -66,7 +66,9 @@ const setContext = setState; */
 const clone = simpleClone; */
 
 const BaseMiddlewareHandlerInit = handler => {
-  const dispatchFn = async (...args) => {
+  const dispatchFn = async (...options) => {
+    const [instanceMethods, ...args] = options;
+    const { getStateTree } = instanceMethods;
     try {
       await handler(
         {
@@ -85,7 +87,7 @@ const BaseMiddlewareHandlerInit = handler => {
           },
           getHelpers: MiddlewareHelpersInit()
         },
-        {}
+        { ...getStateTree() } // TODO: Non-built-in methods
       );
     } catch (error) {
       /* ignore, next() is called */
@@ -121,10 +123,11 @@ const BaseMiddleware = ({ handler, configure } = {}) => {
 
       if (typeof newMethod === "function") {
         if (fnName === "onCatch") {
-          pre[SYMBOL_MIDDLEWARE_ON_CATCH] = (oldMethod, e) => {
+          pre[SYMBOL_MIDDLEWARE_ON_CATCH] = (oldMethod, e, params) => {
             return newMethod(() => oldMethod(e), {
               prevRawMethod: oldMethod,
-              arg: e
+              arg: e,
+              ...params
             });
           };
         }
@@ -149,7 +152,8 @@ const BodyParserMiddleware = () => {
 const CreateInstance = options => {
   let settings = {
     DEBUG: false,
-    stopOnCatch: true
+    stopOnCatch: true,
+    register: []
   };
 
   settings = objectAssignIfExists({}, settings, options);
@@ -186,6 +190,22 @@ const CreateInstance = options => {
     pvtLogger.logError = () => {};
     pvtLogger.logWarning = () => {};
   }
+
+  /* start plugins state tree */
+
+  const stateTree = {};
+  const setStateTree = (treeKey, obj) => {
+    if (typeof stateTree[treeKey] === 'undefined') {
+      /* eslint-disable-next-line prefer-destructuring */
+      stateTree[treeKey] = obj;
+      return;
+    }
+
+    throw Error(`tree key "${treeKey}" already in use`);
+  };
+  const getStateTree = () => stateTree;
+
+  /* end plugins state tree */
 
   let onReturnObject = args => args;
   const onReply = (...args) => onReturnObject(...args);
@@ -314,7 +334,9 @@ const CreateInstance = options => {
       if (args[0].every(fn => typeof fn === "function")) {
         const FOArray = args[0].map(item => CreateInstance(options)(item));
         FOArray.use = (...useArgs) => {
-          const FOArrayInner = FOArray.map(instance => instance.use(...useArgs))
+          const FOArrayInner = FOArray.map(instance =>
+            instance.use(...useArgs)
+          );
           FOArrayInner.use = FOArray.use;
           return FOArrayInner;
         };
@@ -322,7 +344,7 @@ const CreateInstance = options => {
         return FOArray;
       }
       throw Error(
-        "before-hook can only be used for functions. One of the item in arrays is not."
+        "before-hook can only be used for functions. One of the items in array is not."
       );
     } else if (typeof args[0] !== "function") {
       if (handlerLength > -1 && handlerLength !== args.length) {
@@ -333,6 +355,15 @@ const CreateInstance = options => {
         );
       }
 
+      if (Array.isArray(args[0])) {
+
+        /* eslint-disable-next-line no-console */
+        console.error(`[DEPRECATED] -
+        This action will execute your hooked function given the array argument.
+        If you intended to hook an array of functions instead.
+        Please use beforeHook.getNew.`);
+      }
+
       return FODispatch(...args);
     }
 
@@ -341,12 +372,35 @@ const CreateInstance = options => {
       return CreateInstance(options)(args[0]);
     }
 
-    [handler] = args;
+    /* eslint-disable-next-line */
+    handler = args[0];
 
     isHandlerFed = true;
 
     return FODispatch;
   };
+
+  FOInitBeforeHook.getNew = (arrayOfFunctions) => {
+    if (!Array.isArray(arrayOfFunctions)) {
+      throw Error(`Expecting an array argument but type "${typeof arrayOfFunctions}" was passed.`);
+    }
+
+    if (arrayOfFunctions.every(fn => typeof fn === "function")) {
+      const FOArray = arrayOfFunctions.map(item => CreateInstance(options)(item));
+      FOArray.use = (...useArgs) => {
+        const FOArrayInner = FOArray.map(instance =>
+          instance.use(...useArgs)
+        );
+        FOArrayInner.use = FOArray.use;
+        return FOArrayInner;
+      };
+
+      return FOArray;
+    }
+    throw Error(
+      "before-hook can only be used for functions. One of the items in array is not."
+    );
+  }
 
   FOInitBeforeHook.use = (...args) => {
     if (!args || !args[0]) {
@@ -393,13 +447,23 @@ const CreateInstance = options => {
     let hookBeforeCatching = {};
     pvtDispatched = true;
 
+    if (Array.isArray(settings.register) && settings.register.length) {
+      // TODO: support loading async plugins
+      settings.register.forEach(pluginFn => {
+        pluginFn({
+          getParams: () => args,
+          addTree: setStateTree
+        });
+      });
+    }
+
     try {
       /* eslint-disable-next-line no-restricted-syntax */
       for (const hook of stackedHooks) {
         hookBeforeCatching = hook;
 
         /* eslint-disable-next-line no-await-in-loop */
-        await hook(...args);
+        await hook({ getStateTree }, ...args);
         // const extensions = await hook(...args);
       }
     } catch (middlewaresThrow) {
@@ -414,7 +478,8 @@ const CreateInstance = options => {
           ? (err, params) =>
               hookBeforeCatching[SYMBOL_MIDDLEWARE_ON_CATCH](
                 e => onCatch(e, params),
-                err
+                err,
+                params
               )
           : (err, params) => onCatch(err, params);
       if (settings.stopOnCatch === true) {
